@@ -64,7 +64,7 @@ Server runs at **http://localhost:4000**
 
 | Variable       | Description                                          |
 |----------------|------------------------------------------------------|
-| `DATABASE_URL` | `postgresql://postgres:pass@localhost:5432/promotion-approval` |
+| `DATABASE_URL` | `postgresql://postgres:pass@localhost:5433/promotion-approval` |
 | `JWT_SECRET`   | Any long random string (64+ chars)                   |
 | `CLIENT_URL`   | `http://localhost:5173` (dev) or your Vercel URL     |
 | `PORT`         | `4000` (default)                                     |
