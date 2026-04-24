@@ -4,32 +4,32 @@ import { useApp } from "../context/AppContext";
 import Icon from "../components/Icon";
 
 export default function LoginPage() {
-  const { state, setState } = useApp();
-  const [role, setRole] = useState("admin");
-  const [email, setEmail] = useState("admin@promodash.local");
+  const { login } = useApp();
+  const [role,     setRole]     = useState("admin");
+  const [email,    setEmail]    = useState("admin@promodash.local");
+  const [password, setPassword] = useState("password");
+  const [error,    setError]    = useState("");
+  const [loading,  setLoading]  = useState(false);
   const navigate = useNavigate();
 
   const handleRoleChange = (newRole) => {
     setRole(newRole);
     setEmail(newRole === "admin" ? "admin@promodash.local" : "client@cognesense.com");
+    setError("");
   };
 
-  const handleSubmit = (e) => {
+  const handleSubmit = async (e) => {
     e.preventDefault();
-    const firstClientProject = state.projects.find((p) => p.clientUsers.includes(email));
-    const client = state.clients.find((c) => c.email.toLowerCase() === email.toLowerCase());
-    setState({
-      session: {
-        role,
-        email,
-        name: role === "admin" ? "Admin Team" : client?.name || "Client",
-      },
-      selectedProjectId:
-        role === "admin"
-          ? state.selectedProjectId
-          : firstClientProject?.id || state.selectedProjectId,
-    });
-    navigate("/");
+    setError("");
+    setLoading(true);
+    try {
+      await login(email.trim(), password);
+      navigate("/");
+    } catch (err) {
+      setError(err.message || "Login failed");
+    } finally {
+      setLoading(false);
+    }
   };
 
   return (
@@ -49,7 +49,7 @@ export default function LoginPage() {
           <h2>Sign in</h2>
           <p className="muted">Use the seeded demo account that matches your workflow.</p>
           <div className="role-switch" aria-label="Select role">
-            <button type="button" className={role === "admin" ? "active" : ""} onClick={() => handleRoleChange("admin")}>Admin</button>
+            <button type="button" className={role === "admin"  ? "active" : ""} onClick={() => handleRoleChange("admin")}>Admin</button>
             <button type="button" className={role === "client" ? "active" : ""} onClick={() => handleRoleChange("client")}>Client</button>
           </div>
           <label className="field">
@@ -58,10 +58,11 @@ export default function LoginPage() {
           </label>
           <label className="field">
             <span>Password</span>
-            <input type="password" defaultValue="password" autoComplete="current-password" required />
+            <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} autoComplete="current-password" required />
           </label>
-          <button className="btn" type="submit" style={{ width: "100%", marginTop: "22px" }}>
-            <Icon name="check" /> Sign in
+          {error && <p style={{ color: "var(--danger)", marginTop: "8px", fontSize: "14px" }}>{error}</p>}
+          <button className="btn" type="submit" disabled={loading} style={{ width: "100%", marginTop: "22px" }}>
+            <Icon name="check" /> {loading ? "Signing in…" : "Sign in"}
           </button>
         </form>
       </section>

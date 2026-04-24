@@ -1,20 +1,34 @@
-import { useState, useRef } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { useApp } from "../context/AppContext";
 import { useSelectors } from "../hooks/useSelectors";
-import { formatDate, formatDateTime, isEmailType, slugId } from "../utils/helpers";
+import { formatDate, formatDateTime, isEmailType } from "../utils/helpers";
 import { StatusBadge, TypeBadge } from "../components/Badges";
+import { imageUrl } from "../services/api";
 import Modal from "../components/Modal";
 import Icon from "../components/Icon";
 
+// ─── Creative Preview ─────────────────────────────────────────────────────────
+// imageUrl() converts the relative /uploads/xxx.jpg path from DB into
+// the full URL using VITE_API_URL — works in dev AND production unchanged.
 function CreativePreview({ version, promoType }) {
   if (!version) return <div className="preview"><div className="empty">No creative uploaded.</div></div>;
-  if (version.url && version.fileType === "image") {
-    return <div className="preview"><img src={version.url} alt={version.fileName} /></div>;
+
+  if (version.fileType === "image") {
+    return (
+      <div className="preview">
+        <img src={imageUrl(version.url)} alt={version.fileName} />
+      </div>
+    );
   }
-  if (version.url && version.fileType === "pdf") {
-    return <div className="preview"><iframe className="pdf-preview" src={version.url} title={version.fileName} /></div>;
+  if (version.fileType === "pdf") {
+    return (
+      <div className="preview">
+        <iframe className="pdf-preview" src={imageUrl(version.url)} title={version.fileName} />
+      </div>
+    );
   }
+  // Fallback SVG placeholder
   return (
     <div className="preview">
       <svg viewBox="0 0 800 480" width="100%" height="100%" role="img" aria-label={version.fileName}>
@@ -33,69 +47,95 @@ function CreativePreview({ version, promoType }) {
 
 export default function PromotionDetailPage() {
   const { promotionId } = useParams();
-  const { state, setState } = useApp();
-  const { getProject, getVersions, getComments } = useSelectors();
   const navigate = useNavigate();
-  const [modal, setModal] = useState(null);
+  const {
+    state,
+    loadProjects, loadPromotions, loadVersions, loadComments,
+    updatePromotionStatus, setPromotionVersion,
+    createComment, deleteVersion,
+  } = useApp();
+  const { getProject, getVersions, getComments } = useSelectors();
+
+  const [modal,   setModal]   = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [submitting, setSubmitting] = useState(false);
   const commentRef = useRef(null);
 
+  useEffect(() => {
+    Promise.all([
+      loadProjects(),
+      loadPromotions(),
+      loadVersions(promotionId),
+      loadComments(promotionId),
+    ])
+      .catch(console.error)
+      .finally(() => setLoading(false));
+  }, [promotionId]);
+
   const promo = state.promotions.find((p) => p.id === promotionId);
-  if (!promo) return <div className="empty">Promotion not found.</div>;
 
-  const project = getProject(promo.projectId);
-  const versions = getVersions(promo.id);
-  const currentVersion = state.versions.find((v) => v.id === promo.currentVersionId) || versions[0];
-  const comments = getComments(promo.id);
+  if (loading) return <div className="empty">Loading promotion…</div>;
+  if (!promo)  return <div className="empty">Promotion not found.</div>;
 
-  const updateStatus = (status) => {
-    const commentText = {
-      Approved: "Approved this promotion.",
-      "Revision Required": "Marked this promotion as needing changes.",
-      Published: "Marked this promotion as published.",
-      "Pending Approval": "Sent this promotion for approval.",
-    }[status] || "";
+  const project        = getProject(promo.projectId);
+  const versions       = getVersions(promo.id);
+  const currentVersion = versions.find((v) => v.id === promo.currentVersionId) || versions[0];
+  const comments       = getComments(promo.id);
+  const emailType      = isEmailType(promo.type, state.promotionTypes);
 
-    setState({
-      promotions: state.promotions.map((p) => (p.id === promo.id ? { ...p, status } : p)),
-      comments: [
-        ...state.comments,
-        {
-          id: slugId("comment", status),
-          promotionId: promo.id,
-          author: state.session?.role === "admin" ? "Admin" : "Client",
-          role: state.session?.role,
-          body: commentText,
-          createdAt: new Date().toISOString(),
-        },
-      ],
-    });
+  // ── Status update ─────────────────────────────────────────────────────────
+  const handleStatusUpdate = async (status) => {
+    try {
+      await updatePromotionStatus(promo.id, status);
+      // Add auto-comment
+      const body = {
+        Approved:           "Approved this promotion.",
+        "Revision Required":"Marked this promotion as needing changes.",
+        Published:          "Marked this promotion as published.",
+        "Pending Approval": "Sent this promotion for approval.",
+      }[status];
+      if (body) await createComment(promo.id, body);
+      await loadComments(promotionId);
+    } catch (e) {
+      alert(e.message);
+    }
   };
 
-  const selectVersion = (versionId) => {
-    setState({ promotions: state.promotions.map((p) => (p.id === promo.id ? { ...p, currentVersionId: versionId } : p)) });
+  // ── Select version ────────────────────────────────────────────────────────
+  const handleSelectVersion = async (versionId) => {
+    try {
+      await setPromotionVersion(promo.id, versionId);
+    } catch (e) {
+      alert(e.message);
+    }
   };
 
-  const addComment = (e) => {
+  // ── Delete version ────────────────────────────────────────────────────────
+  const handleDeleteVersion = async (versionId) => {
+    if (!window.confirm("Delete this creative version?")) return;
+    try {
+      await deleteVersion(versionId);
+    } catch (e) {
+      alert(e.message);
+    }
+  };
+
+  // ── Add comment ───────────────────────────────────────────────────────────
+  const handleAddComment = async (e) => {
     e.preventDefault();
     const body = commentRef.current?.value?.trim();
     if (!body) return;
-    setState({
-      comments: [
-        ...state.comments,
-        {
-          id: slugId("comment", body),
-          promotionId: promo.id,
-          author: state.session?.role === "admin" ? "Admin" : "Client",
-          role: state.session?.role,
-          body,
-          createdAt: new Date().toISOString(),
-        },
-      ],
-    });
-    if (commentRef.current) commentRef.current.value = "";
+    setSubmitting(true);
+    try {
+      await createComment(promo.id, body);
+      if (commentRef.current) commentRef.current.value = "";
+      await loadComments(promotionId);
+    } catch (err) {
+      alert(err.message);
+    } finally {
+      setSubmitting(false);
+    }
   };
-
-  const emailType = isEmailType(promo.type, state.promotionTypes);
 
   return (
     <>
@@ -118,7 +158,7 @@ export default function PromotionDetailPage() {
           {state.session?.role === "admin" && (
             <>
               <button className="btn secondary" onClick={() => setModal({ type: "version" })}>
-                <Icon name="upload" /> Options
+                <Icon name="upload" /> Upload
               </button>
               <button className="btn secondary" onClick={() => setModal({ type: "promotion", context: { id: promo.id } })}>
                 <Icon name="edit" /> Edit
@@ -139,7 +179,7 @@ export default function PromotionDetailPage() {
                   <button
                     key={v.id}
                     className={`option-chip ${v.id === promo.currentVersionId ? "active" : ""}`}
-                    onClick={() => selectVersion(v.id)}
+                    onClick={() => handleSelectVersion(v.id)}
                     type="button"
                   >
                     Option {v.version}
@@ -149,7 +189,7 @@ export default function PromotionDetailPage() {
               </div>
             )}
             <CreativePreview version={currentVersion} promoType={promo.type} />
-            {promo.type === "social" && promo.captions.length > 0 && (
+            {promo.type === "social" && promo.captions?.length > 0 && (
               <div className="caption-box">
                 {promo.captions.map((caption, i) => (
                   <div key={i}>
@@ -164,13 +204,21 @@ export default function PromotionDetailPage() {
             <div className="split-actions">
               {state.session?.role === "client" ? (
                 <>
-                  <button className="btn" onClick={() => updateStatus("Approved")}><Icon name="check" /> Approve</button>
-                  <button className="btn danger" onClick={() => updateStatus("Revision Required")}><Icon name="edit" /> Needs Changes</button>
+                  <button className="btn" onClick={() => handleStatusUpdate("Approved")}>
+                    <Icon name="check" /> Approve
+                  </button>
+                  <button className="btn danger" onClick={() => handleStatusUpdate("Revision Required")}>
+                    <Icon name="edit" /> Needs Changes
+                  </button>
                 </>
               ) : (
                 <>
-                  <button className="btn secondary" onClick={() => updateStatus("Pending Approval")}>Send for Approval</button>
-                  <button className="btn" onClick={() => updateStatus("Published")}><Icon name="check" /> Mark Published</button>
+                  <button className="btn secondary" onClick={() => handleStatusUpdate("Pending Approval")}>
+                    Send for Approval
+                  </button>
+                  <button className="btn" onClick={() => handleStatusUpdate("Published")}>
+                    <Icon name="check" /> Mark Published
+                  </button>
                 </>
               )}
             </div>
@@ -181,12 +229,31 @@ export default function PromotionDetailPage() {
             {versions.length
               ? versions.map((v) => (
                   <div key={v.id} className="version-item">
-                    <strong>Option {v.version} · {v.label}</strong>
-                    <div className="muted">{v.fileName} · {v.uploadedBy} · {formatDateTime(v.uploadedAt)}</div>
-                    <div className="muted">{v.notes}</div>
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
+                      <div>
+                        <strong>Option {v.version} · {v.label}</strong>
+                        <div className="muted">{v.fileName} · {v.uploadedBy} · {formatDateTime(v.uploadedAt)}</div>
+                        {v.notes && <div className="muted">{v.notes}</div>}
+                      </div>
+                      <div className="toolbar">
+                        <a
+                          className="btn secondary small"
+                          href={imageUrl(v.url)}
+                          target="_blank"
+                          rel="noreferrer"
+                        >
+                          View
+                        </a>
+                        {state.session?.role === "admin" && (
+                          <button className="btn danger small" onClick={() => handleDeleteVersion(v.id)}>
+                            Delete
+                          </button>
+                        )}
+                      </div>
+                    </div>
                   </div>
                 ))
-              : <div className="empty">No versions uploaded.</div>}
+              : <div className="empty">No versions uploaded yet.</div>}
           </article>
         </div>
 
@@ -203,20 +270,28 @@ export default function PromotionDetailPage() {
                 ))
               : <div className="empty">No comments yet.</div>}
           </div>
-          <form onSubmit={addComment} style={{ marginTop: "14px" }}>
+          <form onSubmit={handleAddComment} style={{ marginTop: "14px" }}>
             <label className="field">
               <span>Comment</span>
               <textarea ref={commentRef} placeholder="Add feedback or context" required />
             </label>
-            <button className="btn" type="submit" style={{ marginTop: "12px" }}>
-              <Icon name="plus" /> Add Comment
+            <button className="btn" type="submit" style={{ marginTop: "12px" }} disabled={submitting}>
+              <Icon name="plus" /> {submitting ? "Posting…" : "Add Comment"}
             </button>
           </form>
         </aside>
       </section>
 
       {modal && (
-        <Modal type={modal.type} context={modal.context || {}} onClose={() => setModal(null)} />
+        <Modal
+          type={modal.type}
+          context={{ ...modal.context, promotionId: promo.id, projectId: promo.projectId }}
+          onClose={() => {
+            setModal(null);
+            // Refresh versions after upload
+            loadVersions(promotionId);
+          }}
+        />
       )}
     </>
   );

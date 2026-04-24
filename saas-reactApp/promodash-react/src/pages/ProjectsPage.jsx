@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { useApp } from "../context/AppContext";
 import { useSelectors } from "../hooks/useSelectors";
@@ -10,7 +10,7 @@ function ProjectCard({ project, onEdit, onDelete }) {
   const { state } = useApp();
   const { getProjectPromotions } = useSelectors();
   const navigate = useNavigate();
- 
+
   const promotions = getProjectPromotions(project.id);
   const pending = promotions.filter((p) => p.status === "Pending Approval").length;
 
@@ -42,25 +42,32 @@ function ProjectCard({ project, onEdit, onDelete }) {
 }
 
 export default function ProjectsPage() {
-  const { state, setState } = useApp();
+  const { state, loadProjects, loadPromotions, deleteProject } = useApp();
   const { getVisibleProjects } = useSelectors();
-  const navigate = useNavigate();
-  const [modal, setModal] = useState(null);
+  const [modal,   setModal]   = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [error,   setError]   = useState("");
+
   const projects = getVisibleProjects();
 
-  const handleDelete = (projectId) => {
+  useEffect(() => {
+    Promise.all([loadProjects(), loadPromotions()])
+      .catch((e) => setError(e.message))
+      .finally(() => setLoading(false));
+  }, []);
+
+  const handleDelete = async (projectId) => {
     const project = state.projects.find((p) => p.id === projectId);
     if (!project || !window.confirm(`Delete project "${project.name}" and all its promotions?`)) return;
-    const promotionIds = state.promotions.filter((p) => p.projectId === projectId).map((p) => p.id);
-    const remaining = state.projects.filter((p) => p.id !== projectId);
-    setState({
-      projects: remaining,
-      promotions: state.promotions.filter((p) => p.projectId !== projectId),
-      versions: state.versions.filter((v) => !promotionIds.includes(v.promotionId)),
-      comments: state.comments.filter((c) => !promotionIds.includes(c.promotionId)),
-      selectedProjectId: remaining[0]?.id || null,
-    });
+    try {
+      await deleteProject(projectId);
+    } catch (e) {
+      alert(e.message);
+    }
   };
+
+  if (loading) return <div className="empty">Loading projects…</div>;
+  if (error)   return <div className="empty" style={{ color: "var(--danger)" }}>{error}</div>;
 
   return (
     <>
@@ -78,13 +85,13 @@ export default function ProjectsPage() {
       <div className="list">
         {projects.length
           ? projects.map((p) => (
-            <ProjectCard
-              key={p.id}
-              project={p}
-              onEdit={(id) => setModal({ type: "project", context: { id } })}
-              onDelete={handleDelete}
-            />
-          ))
+              <ProjectCard
+                key={p.id}
+                project={p}
+                onEdit={(id) => setModal({ type: "project", context: { id } })}
+                onDelete={handleDelete}
+              />
+            ))
           : <div className="empty">No assigned projects.</div>}
       </div>
       {modal && (

@@ -1,34 +1,31 @@
 const router = require("express").Router();
-const pool = require("../db/pool");
+const prisma  = require("../db/prisma");
 const { requireAuth, requireAdmin } = require("../middleware/auth");
-const { v4: uuidv4 } = require("uuid");
 
-// Helper: row → camelCase object
-function mapProject(row) {
+function mapProject(p) {
   return {
-    id: row.id,
-    name: row.name,
-    client: row.client,
-    owner: row.owner,
-    description: row.description,
-    clientUsers: row.client_users || [],
-    createdAt: row.created_at,
+    id: p.id,
+    name: p.name,
+    client: p.client,
+    owner: p.owner,
+    description: p.description || "",
+    clientUsers: p.clientUsers || [],
+    createdAt: p.createdAt,
   };
 }
 
 // GET /api/projects
 router.get("/", requireAuth, async (req, res) => {
   try {
-    let query, params;
-    if (req.user.role === "admin") {
-      query = "SELECT * FROM projects ORDER BY created_at DESC";
-      params = [];
-    } else {
-      query = "SELECT * FROM projects WHERE $1 = ANY(client_users) ORDER BY created_at DESC";
-      params = [req.user.email];
-    }
-    const { rows } = await pool.query(query, params);
-    res.json(rows.map(mapProject));
+    const where = req.user.role === "admin"
+      ? {}
+      : { clientUsers: { has: req.user.email } };
+
+    const projects = await prisma.project.findMany({
+      where,
+      orderBy: { createdAt: "desc" },
+    });
+    res.json(projects.map(mapProject));
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: "Server error" });
@@ -38,13 +35,13 @@ router.get("/", requireAuth, async (req, res) => {
 // GET /api/projects/:id
 router.get("/:id", requireAuth, async (req, res) => {
   try {
-    const { rows } = await pool.query("SELECT * FROM projects WHERE id = $1", [req.params.id]);
-    if (!rows[0]) return res.status(404).json({ error: "Project not found" });
-    const project = mapProject(rows[0]);
-    if (req.user.role !== "admin" && !project.clientUsers.includes(req.user.email)) {
+    const project = await prisma.project.findUnique({ where: { id: req.params.id } });
+    if (!project) return res.status(404).json({ error: "Project not found" });
+
+    if (req.user.role !== "admin" && !project.clientUsers.includes(req.user.email))
       return res.status(403).json({ error: "Access denied" });
-    }
-    res.json(project);
+
+    res.json(mapProject(project));
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: "Server error" });
@@ -56,14 +53,11 @@ router.post("/", requireAuth, requireAdmin, async (req, res) => {
   const { name, client, owner = "Growth Team", description, clientUsers = [] } = req.body;
   if (!name || !client) return res.status(400).json({ error: "name and client required" });
 
-  const id = `project-${uuidv4()}`;
   try {
-    const { rows } = await pool.query(
-      `INSERT INTO projects (id, name, client, owner, description, client_users)
-       VALUES ($1,$2,$3,$4,$5,$6) RETURNING *`,
-      [id, name.trim(), client.trim(), owner, description?.trim() || "", clientUsers]
-    );
-    res.status(201).json(mapProject(rows[0]));
+    const project = await prisma.project.create({
+      data: { name: name.trim(), client: client.trim(), owner, description: description?.trim() || "", clientUsers },
+    });
+    res.status(201).json(mapProject(project));
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: "Server error" });
@@ -74,22 +68,19 @@ router.post("/", requireAuth, requireAdmin, async (req, res) => {
 router.put("/:id", requireAuth, requireAdmin, async (req, res) => {
   const { name, client, owner, description, clientUsers } = req.body;
   try {
-    const { rows } = await pool.query(
-      `UPDATE projects
-       SET name=$1, client=$2, owner=$3, description=$4, client_users=$5
-       WHERE id=$6 RETURNING *`,
-      [
-        name?.trim(),
-        client?.trim(),
-        owner || "Growth Team",
-        description?.trim() || "",
-        clientUsers || [],
-        req.params.id,
-      ]
-    );
-    if (!rows[0]) return res.status(404).json({ error: "Project not found" });
-    res.json(mapProject(rows[0]));
+    const project = await prisma.project.update({
+      where: { id: req.params.id },
+      data: {
+        name: name?.trim(),
+        client: client?.trim(),
+        owner: owner || "Growth Team",
+        description: description?.trim() || "",
+        clientUsers: clientUsers || [],
+      },
+    });
+    res.json(mapProject(project));
   } catch (err) {
+    if (err.code === "P2025") return res.status(404).json({ error: "Project not found" });
     console.error(err);
     res.status(500).json({ error: "Server error" });
   }
@@ -98,10 +89,10 @@ router.put("/:id", requireAuth, requireAdmin, async (req, res) => {
 // DELETE /api/projects/:id
 router.delete("/:id", requireAuth, requireAdmin, async (req, res) => {
   try {
-    const { rowCount } = await pool.query("DELETE FROM projects WHERE id=$1", [req.params.id]);
-    if (!rowCount) return res.status(404).json({ error: "Project not found" });
+    await prisma.project.delete({ where: { id: req.params.id } });
     res.json({ success: true });
   } catch (err) {
+    if (err.code === "P2025") return res.status(404).json({ error: "Project not found" });
     console.error(err);
     res.status(500).json({ error: "Server error" });
   }

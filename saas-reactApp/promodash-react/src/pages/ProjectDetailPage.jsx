@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { useApp } from "../context/AppContext";
 import { useSelectors } from "../hooks/useSelectors";
@@ -8,25 +8,32 @@ import Icon from "../components/Icon";
 
 export default function ProjectDetailPage() {
   const { projectId } = useParams();
-  const { state, setState } = useApp();
+  const { state, loadProjects, loadPromotions, deletePromotion } = useApp();
   const { getProject, getProjectPromotions } = useSelectors();
   const navigate = useNavigate();
-  const [modal, setModal] = useState(null);
+  const [modal,   setModal]   = useState(null);
+  const [loading, setLoading] = useState(true);
 
-  const project = getProject(projectId);
+  useEffect(() => {
+    Promise.all([loadProjects(), loadPromotions(projectId)])
+      .catch(console.error)
+      .finally(() => setLoading(false));
+  }, [projectId]);
+
+  const project    = getProject(projectId);
   const promotions = getProjectPromotions(projectId);
 
-  const handleDeletePromotion = (promotionId) => {
+  const handleDeletePromotion = async (promotionId) => {
     const promo = state.promotions.find((p) => p.id === promotionId);
     if (!promo || !window.confirm(`Delete promotion "${promo.title}"?`)) return;
-    const remaining = state.promotions.filter((p) => p.id !== promotionId);
-    setState({
-      promotions: remaining,
-      versions: state.versions.filter((v) => v.promotionId !== promotionId),
-      comments: state.comments.filter((c) => c.promotionId !== promotionId),
-    });
+    try {
+      await deletePromotion(promotionId);
+    } catch (e) {
+      alert(e.message);
+    }
   };
 
+  if (loading)  return <div className="empty">Loading project…</div>;
   if (!project) return <div className="empty">Project not found.</div>;
 
   return (
@@ -72,7 +79,7 @@ export default function ProjectDetailPage() {
       {modal && (
         <Modal
           type={modal.type}
-          context={modal.context || {}}
+          context={{ ...modal.context, projectId }}
           onClose={() => setModal(null)}
         />
       )}

@@ -1,9 +1,8 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { useApp } from "../context/AppContext";
 import { useSelectors } from "../hooks/useSelectors";
-import { formatDate, formatDateTime } from "../utils/helpers";
-import { StatusBadge, TypeBadge } from "../components/Badges";
+import { formatDateTime } from "../utils/helpers";
 import Modal from "../components/Modal";
 import PromotionCard from "../components/PromotionCard";
 import Icon from "../components/Icon";
@@ -22,33 +21,45 @@ function TimelineItem({ promo, onEdit, onDelete }) {
 }
 
 export default function DashboardPage() {
-  const { state, setState } = useApp();
+  const { state, loadProjects, loadPromotions, loadComments, deletePromotion } = useApp();
   const { getVisibleProjects, getProjectPromotions } = useSelectors();
   const navigate = useNavigate();
-  const [modal, setModal] = useState(null);
+  const [modal,   setModal]   = useState(null);
+  const [loading, setLoading] = useState(true);
 
-  const projects = getVisibleProjects();
+  useEffect(() => {
+    Promise.all([loadProjects(), loadPromotions()])
+      .then(async () => {
+        // Load comments for visible promotions after promotions load
+        await loadComments && loadComments();
+      })
+      .catch(console.error)
+      .finally(() => setLoading(false));
+  }, []);
+
+  const projects   = getVisibleProjects();
   const promotions = getProjectPromotions(null);
-  const pending = promotions.filter((p) => p.status === "Pending Approval").length;
-  const revisions = promotions.filter((p) => p.status === "Revision Required").length;
-  const approved = promotions.filter((p) => p.status === "Approved").length;
-  const published = promotions.filter((p) => p.status === "Published").length;
-  const upcoming = promotions.slice(0, 5);
+  const pending    = promotions.filter((p) => p.status === "Pending Approval").length;
+  const revisions  = promotions.filter((p) => p.status === "Revision Required").length;
+  const approved   = promotions.filter((p) => p.status === "Approved").length;
+  const published  = promotions.filter((p) => p.status === "Published").length;
+  const upcoming   = promotions.slice(0, 5);
   const recentFeedback = state.comments
     .filter((c) => promotions.some((p) => p.id === c.promotionId))
     .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt))
     .slice(0, 4);
 
-  const handleDeletePromotion = (promotionId) => {
+  const handleDeletePromotion = async (promotionId) => {
     const promo = state.promotions.find((p) => p.id === promotionId);
     if (!promo || !window.confirm(`Delete promotion "${promo.title}"?`)) return;
-    const remaining = state.promotions.filter((p) => p.id !== promotionId);
-    setState({
-      promotions: remaining,
-      versions: state.versions.filter((v) => v.promotionId !== promotionId),
-      comments: state.comments.filter((c) => c.promotionId !== promotionId),
-    });
+    try {
+      await deletePromotion(promotionId);
+    } catch (e) {
+      alert(e.message);
+    }
   };
+
+  if (loading) return <div className="empty">Loading dashboard…</div>;
 
   return (
     <>
