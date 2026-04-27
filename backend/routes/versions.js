@@ -6,19 +6,6 @@ const path    = require("path");
 const fs      = require("fs");
 const { v4: uuidv4 } = require("uuid");
 
-// ─────────────────────────────────────────────────────────────────────────────
-//  UPLOAD SETUP
-//
-//  Files land at:  server/uploads/<uuid>.<ext>
-//  DB stores:      url = "/uploads/<uuid>.<ext>"   ← relative path
-//
-//  Frontend converts to full URL via imageUrl(version.url):
-//    Dev:  http://localhost:4000/uploads/<uuid>.jpg
-//    Prod: https://your-api.onrender.com/uploads/<uuid>.jpg
-//
-//  Only VITE_API_URL changes between environments — DB paths stay the same.
-//  No DB update needed when you deploy to a new domain.
-// ─────────────────────────────────────────────────────────────────────────────
 
 const UPLOAD_DIR = path.join(__dirname, "../uploads");
 if (!fs.existsSync(UPLOAD_DIR)) fs.mkdirSync(UPLOAD_DIR, { recursive: true });
@@ -74,9 +61,7 @@ router.get("/", requireAuth, async (req, res) => {
   }
 });
 
-// POST /api/versions/upload  (multipart/form-data)
-//   Fields: promotionId, label, notes
-//   Files:  files[] (multiple)
+
 router.post("/upload", requireAuth, requireAdmin, upload.array("files", 10), async (req, res) => {
   const { promotionId, label, notes } = req.body;
   if (!promotionId || !req.files?.length)
@@ -101,9 +86,7 @@ router.post("/upload", requireAuth, requireAdmin, upload.array("files", 10), asy
         ? `${(label || "Creative option").trim()} ${i + 1}`
         : (label || "Creative option").trim();
 
-      // ── RELATIVE PATH — deployment-safe ───────────────────────────────────
-      //  Never store an absolute URL (http://...) in the DB.
-      //  The frontend's imageUrl() prepends VITE_API_URL at runtime.
+    
       const relativeUrl = `/uploads/${file.filename}`;
 
       const version = await prisma.version.create({
@@ -121,7 +104,7 @@ router.post("/upload", requireAuth, requireAdmin, upload.array("files", 10), asy
       created.push(mapVersion(version));
     }
 
-    // Auto-set current_version_id and move to Pending Approval
+   
     await prisma.promotion.update({
       where: { id: promotionId },
       data:  { currentVersionId: created[0].id, status: "Pending_Approval" },
