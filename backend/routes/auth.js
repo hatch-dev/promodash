@@ -1,5 +1,6 @@
 const router  = require("express").Router();
 const jwt     = require("jsonwebtoken");
+const bcrypt  = require("bcryptjs");
 const prisma  = require("../db/prisma");
 
 const SECRET = process.env.JWT_SECRET || "dev_secret";
@@ -15,8 +16,15 @@ router.post("/login", async (req, res) => {
       where: { email: { equals: email.trim(), mode: "insensitive" } },
     });
 
-    // NOTE: Replace with bcrypt.compare() in production
-    if (!user || user.password !== password)
+    if (!user) return res.status(401).json({ error: "Invalid email or password" });
+
+    // Support both bcrypt hashed and plain (migration period)
+    const isHashed = user.password.startsWith("$2");
+    const valid = isHashed
+      ? await bcrypt.compare(password, user.password)
+      : user.password === password;
+
+    if (!valid)
       return res.status(401).json({ error: "Invalid email or password" });
 
     const payload = { id: user.id, email: user.email, role: user.role, name: user.name };
@@ -29,7 +37,7 @@ router.post("/login", async (req, res) => {
   }
 });
 
-// GET /api/auth/me — verify token + return user
+// GET /api/auth/me
 router.get("/me", async (req, res) => {
   const header = req.headers.authorization || "";
   const token  = header.startsWith("Bearer ") ? header.slice(7) : null;

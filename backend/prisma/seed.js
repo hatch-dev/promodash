@@ -1,7 +1,3 @@
-// prisma/seed.js
-// Run: npx prisma db seed
-// Or:  node prisma/seed.js
-
 const { PrismaClient } = require("@prisma/client");
 const prisma = new PrismaClient();
 

@@ -1,7 +1,3 @@
-// db/prisma.js
-// Single shared PrismaClient instance for the whole server.
-// Import this everywhere instead of `new PrismaClient()`.
-
 const { PrismaClient } = require("@prisma/client");
 
 const prisma = new PrismaClient({

@@ -1,9 +1,3 @@
-// ─────────────────────────────────────────────────────────────────────────────
-//  PromoDash — Prisma Schema
-//  Generator : prisma-client-js
-//  Datasource: PostgreSQL (DATABASE_URL in .env)
-// ─────────────────────────────────────────────────────────────────────────────
-
 generator client {
   provider = "prisma-client-js"
 }

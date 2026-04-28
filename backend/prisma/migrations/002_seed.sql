@@ -1,12 +1,3 @@
--- ============================================================
---  PromoDash — Seed Data
---  Run AFTER 001_init.sql
---  psql $DATABASE_URL -f prisma/migrations/002_seed.sql
---
---  Passwords are stored in plain text here for demo only.
---  In production, replace with bcrypt hashes.
--- ============================================================
-
 -- Users
 INSERT INTO users (id, name, email, password, role, company) VALUES
   ('user-admin',      'Admin Team',          'admin@promodash.local',      'password', 'admin',  NULL),
