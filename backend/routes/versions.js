@@ -31,16 +31,17 @@ const upload = multer({
 
 function mapVersion(v) {
   return {
-    id:          v.id,
+    id: v.id,
     promotionId: v.promotionId,
-    version:     v.version,
-    label:       v.label,
-    fileName:    v.fileName,
-    fileType:    v.fileType,
-    uploadedBy:  v.uploadedBy,
-    uploadedAt:  v.uploadedAt,
-    url:         v.url,     // relative: /uploads/<uuid>.ext
-    notes:       v.notes || "",
+    version: v.version,
+    label: v.label,
+    fileName: v.fileName,
+    fileType: v.fileType,
+    uploadedBy: v.uploadedBy,
+    uploadedAt: v.uploadedAt,
+    url: v.url,
+    htmlCode: v.htmlCode || "", 
+    notes: v.notes || "",
   };
 }
 
@@ -63,59 +64,168 @@ router.get("/", requireAuth, async (req, res) => {
 
 
 router.post("/upload", requireAuth, requireAdmin, upload.array("files", 10), async (req, res) => {
-  const { promotionId, label, notes } = req.body;
-  if (!promotionId || !req.files?.length)
+
+  const { promotionId, label, notes, fileType, htmlCode } = req.body;
+
+  // ==== HANDLE HTML VERSION ====
+  if (fileType === "html") {
+
+    if (!promotionId || !htmlCode) {
+      return res.status(400).json({ error: "promotionId and htmlCode required" });
+    }
+
+    try {
+      // get latest version number
+      const agg = await prisma.version.aggregate({
+        where: { promotionId },
+        _max: { version: true },
+      });
+
+      const versionNum = (agg._max.version ?? 0) + 1;
+
+      const newVersion = await prisma.version.create({
+        data: {
+          promotionId,
+          version: versionNum,
+          label: label || `Option ${versionNum}`,
+          fileName: "HTML Version",
+          fileType: "html",
+          htmlCode,
+          uploadedBy: req.user.role === "admin" ? "Admin" : "Client",
+          url: "",
+          notes: notes || "",
+        },
+      });
+
+      // set as current version
+      await prisma.promotion.update({
+        where: { id: promotionId },
+        data: { currentVersionId: newVersion.id },
+      });
+
+      return res.status(201).json([mapVersion(newVersion)]);
+    } catch (err) {
+      console.error(err);
+        console.error("REAL ERROR:", err);
+      return res.status(500).json({ error: "Server error" });
+    }
+  }
+
+  // ==== EXISTING FILE UPLOAD=======
+  if (!promotionId || !req.files?.length) {
     return res.status(400).json({ error: "promotionId and at least one file required" });
+  }
 
   try {
-    // Current max version number for this promotion
     const agg = await prisma.version.aggregate({
-      where:   { promotionId },
-      _max:    { version: true },
+      where: { promotionId },
+      _max: { version: true },
     });
+
     let versionNum = agg._max.version ?? 0;
 
     const uploadedBy = req.user.role === "admin" ? "Admin" : "Client";
-    const created    = [];
+    const created = [];
 
     for (let i = 0; i < req.files.length; i++) {
-      const file      = req.files[i];
-      versionNum     += 1;
-      const fileType  = path.extname(file.originalname).toLowerCase() === ".pdf" ? "pdf" : "image";
+      const file = req.files[i];
+      versionNum += 1;
+
+      const fileType = path.extname(file.originalname).toLowerCase() === ".pdf" ? "pdf" : "image";
+
       const versionLabel = req.files.length > 1
         ? `${(label || "Creative option").trim()} ${i + 1}`
         : (label || "Creative option").trim();
 
-    
       const relativeUrl = `/uploads/${file.filename}`;
 
       const version = await prisma.version.create({
         data: {
           promotionId,
-          version:    versionNum,
-          label:      versionLabel,
-          fileName:   file.originalname,
+          version: versionNum,
+          label: versionLabel,
+          fileName: file.originalname,
           fileType,
           uploadedBy,
-          url:        relativeUrl,
-          notes:      notes?.trim() || "",
+          url: relativeUrl,
+          notes: notes?.trim() || "",
         },
       });
+
       created.push(mapVersion(version));
     }
 
-   
     await prisma.promotion.update({
       where: { id: promotionId },
-      data:  { currentVersionId: created[0].id, status: "Pending_Approval" },
+      data: {
+        currentVersionId: created[0].id,
+        status: "Pending_Approval",
+      },
     });
 
     res.status(201).json(created);
+
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: "Server error" });
   }
 });
+// router.post("/upload", requireAuth, requireAdmin, upload.array("files", 10), async (req, res) => {
+//   const { promotionId, label, notes } = req.body;
+//   if (!promotionId || !req.files?.length)
+//     return res.status(400).json({ error: "promotionId and at least one file required" });
+
+//   try {
+//     // Current max version number for this promotion
+//     const agg = await prisma.version.aggregate({
+//       where:   { promotionId },
+//       _max:    { version: true },
+//     });
+//     let versionNum = agg._max.version ?? 0;
+
+//     const uploadedBy = req.user.role === "admin" ? "Admin" : "Client";
+//     const created    = [];
+
+//     for (let i = 0; i < req.files.length; i++) {
+//       const file      = req.files[i];
+//       versionNum     += 1;
+//       const fileType  = path.extname(file.originalname).toLowerCase() === ".pdf" ? "pdf" : "image";
+//       const versionLabel = req.files.length > 1
+//         ? `${(label || "Creative option").trim()} ${i + 1}`
+//         : (label || "Creative option").trim();
+
+    
+//       const relativeUrl = `/uploads/${file.filename}`;
+
+//       const version = await prisma.version.create({
+//         data: {
+//           promotionId,
+//           version:    versionNum,
+//           label:      versionLabel,
+//           fileName:   file.originalname,
+//           fileType,
+//           uploadedBy,
+//           url:        relativeUrl,
+//           notes:      notes?.trim() || "",
+//         },
+//       });
+//       created.push(mapVersion(version));
+//     }
+
+   
+//     await prisma.promotion.update({
+//       where: { id: promotionId },
+//       data:  { currentVersionId: created[0].id, status: "Pending_Approval" },
+//     });
+
+//     res.status(201).json(created);
+//   } catch (err) {
+//     console.error(err);
+//     res.status(500).json({ error: "Server error" });
+//   }
+// });
+
+
 
 // DELETE /api/versions/:id
 router.delete("/:id", requireAuth, requireAdmin, async (req, res) => {

@@ -84,7 +84,8 @@ model Version {
   fileType    FileType  @map("file_type")
   uploadedBy  String    @map("uploaded_by")
   uploadedAt  DateTime  @default(now()) @map("uploaded_at")
-  url         String    // relative path: /uploads/<uuid>.ext
+  url         String?    // relative path: /uploads/<uuid>.ext
+  htmlCode    String?
   notes       String?
 
   promotion           Promotion  @relation(fields: [promotionId], references: [id], onDelete: Cascade)
@@ -122,4 +123,5 @@ enum Status {
 enum FileType {
   image
   pdf
+  html  
 }

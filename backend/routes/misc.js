@@ -1,10 +1,10 @@
 const { Router } = require("express");
+const bcrypt = require("bcryptjs");
 const prisma = require("../db/prisma");
 const { requireAuth, requireAdmin } = require("../middleware/auth");
 
-// ─────────────────────────────────────────────────────────────────────────────
-//  Comments
-// ─────────────────────────────────────────────────────────────────────────────
+// Comments
+
 const commentsRouter = Router();
 
 function mapComment(c) {
@@ -17,7 +17,7 @@ commentsRouter.get("/", requireAuth, async (req, res) => {
   if (!promotionId) return res.status(400).json({ error: "promotionId required" });
   try {
     const comments = await prisma.comment.findMany({
-      where:   { promotionId },
+      where: { promotionId },
       orderBy: { createdAt: "asc" },
     });
     res.json(comments.map(mapComment));
@@ -35,11 +35,11 @@ commentsRouter.post("/", requireAuth, async (req, res) => {
     const comment = await prisma.comment.create({
       data: {
         promotionId,
-        author: req.user.role === "admin" ? "Admin" : "Client",
-        role:   req.user.role,
-        body:   body.trim(),
+        body,
+        author: req.user.name,
+        role: req.user.role,
       },
-    });
+    });;
     res.status(201).json(mapComment(comment));
   } catch (err) {
     console.error(err);
@@ -59,9 +59,7 @@ commentsRouter.delete("/:id", requireAuth, requireAdmin, async (req, res) => {
   }
 });
 
-// ─────────────────────────────────────────────────────────────────────────────
-//  Clients
-// ─────────────────────────────────────────────────────────────────────────────
+// Clients
 const clientsRouter = Router();
 
 function mapClient(c) {
@@ -74,12 +72,29 @@ clientsRouter.get("/", requireAuth, async (_req, res) => {
 });
 
 clientsRouter.post("/", requireAuth, requireAdmin, async (req, res) => {
-  const { name, email, company } = req.body;
+  const { name, email, company, password } = req.body;
   if (!name || !email) return res.status(400).json({ error: "name and email required" });
+  if (!password || !password.trim()) return res.status(400).json({ error: "password required" });
+
   try {
+    const hashed = await bcrypt.hash(password, 10);
+
+    // Create in clients table
     const client = await prisma.client.create({
-      data: { name: name.trim(), email: email.trim().toLowerCase(), company: company?.trim() || "" },
+      data: { name: name.trim(), email: email.trim().toLowerCase(), company: company?.trim() || "", password: hashed },
     });
+
+    // Also create in users table so they can login
+    await prisma.user.create({
+      data: {
+        name: name.trim(),
+        email: email.trim().toLowerCase(),
+        password: hashed,
+        role: "client",
+        company: company?.trim() || "",
+      },
+    }).catch(() => { }); // ignore if user already exists
+
     res.status(201).json(mapClient(client));
   } catch (err) {
     if (err.code === "P2002") return res.status(409).json({ error: "Email already exists" });
@@ -89,16 +104,32 @@ clientsRouter.post("/", requireAuth, requireAdmin, async (req, res) => {
 });
 
 clientsRouter.put("/:id", requireAuth, requireAdmin, async (req, res) => {
-  const { name, email, company } = req.body;
+  const { name, email, company, password } = req.body;
   try {
     const old = await prisma.client.findUnique({ where: { id: req.params.id } });
     if (!old) return res.status(404).json({ error: "Client not found" });
 
     const newEmail = email.trim().toLowerCase();
-    const client   = await prisma.client.update({
+    const updateData = { name: name.trim(), email: newEmail, company: company?.trim() || "" };
+
+    // Only update password if provided
+    if (password) {
+      updateData.password = await bcrypt.hash(password, 10);
+    }
+
+    const client = await prisma.client.update({
       where: { id: req.params.id },
-      data:  { name: name.trim(), email: newEmail, company: company?.trim() || "" },
+      data: updateData,
     });
+
+    // Sync user table too
+    const userUpdate = { name: name.trim(), email: newEmail };
+    if (password) userUpdate.password = updateData.password;
+
+    await prisma.user.updateMany({
+      where: { email: old.email },
+      data: userUpdate,
+    }).catch(() => { });
 
     // Sync email in project client_users arrays if email changed
     if (old.email !== newEmail) {
@@ -108,15 +139,14 @@ clientsRouter.put("/:id", requireAuth, requireAdmin, async (req, res) => {
       for (const p of projects) {
         await prisma.project.update({
           where: { id: p.id },
-          data:  { clientUsers: p.clientUsers.map(e => e === old.email ? newEmail : e) },
+          data: { clientUsers: p.clientUsers.map(e => e === old.email ? newEmail : e) },
         });
       }
     }
+
     res.json(mapClient(client));
   } catch (err) {
     if (err.code === "P2002") return res.status(409).json({ error: "Email already exists" });
-    console.error(err);
-    res.status(500).json({ error: "Server error" });
   }
 });
 
@@ -134,7 +164,7 @@ clientsRouter.delete("/:id", requireAuth, requireAdmin, async (req, res) => {
     for (const p of projects) {
       await prisma.project.update({
         where: { id: p.id },
-        data:  { clientUsers: p.clientUsers.filter(e => e !== client.email) },
+        data: { clientUsers: p.clientUsers.filter(e => e !== client.email) },
       });
     }
     res.json({ success: true });
@@ -177,7 +207,7 @@ typesRouter.put("/:id", requireAuth, requireAdmin, async (req, res) => {
   try {
     const type = await prisma.promotionType.update({
       where: { id: req.params.id },
-      data:  { name: name.trim(), description: description?.trim() || "" },
+      data: { name: name.trim(), description: description?.trim() || "" },
     });
     res.json(mapType(type));
   } catch (err) {

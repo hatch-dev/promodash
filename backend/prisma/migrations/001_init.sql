@@ -1,18 +1,3 @@
--- ============================================================
---  PromoDash — Migration SQL
---
---  Usage options:
---  A) With Prisma (recommended):
---       npx prisma migrate dev --name init
---       npx prisma db seed
---
---  B) Raw psql (no Prisma CLI needed):
---       psql $DATABASE_URL -f prisma/migrations/001_init.sql
---       psql $DATABASE_URL -f prisma/migrations/002_seed.sql
---
---  On Render / Railway, run via the shell console after deploying.
--- ============================================================
-
 -- ── Enums ──────────────────────────────────────────────────────────────────
 DO $$ BEGIN
   CREATE TYPE "Role" AS ENUM ('admin', 'client');
@@ -25,7 +10,7 @@ DO $$ BEGIN
 EXCEPTION WHEN duplicate_object THEN NULL; END $$;
 
 DO $$ BEGIN
-  CREATE TYPE "FileType" AS ENUM ('image', 'pdf');
+  CREATE TYPE "FileType" AS ENUM ('image', 'pdf', 'html');
 EXCEPTION WHEN duplicate_object THEN NULL; END $$;
 
 -- ── Drop & recreate (idempotent reset) ────────────────────────────────────
@@ -61,6 +46,7 @@ CREATE TABLE clients (
   id          TEXT        PRIMARY KEY DEFAULT gen_random_uuid()::TEXT,
   name        TEXT        NOT NULL,
   email       TEXT        NOT NULL UNIQUE,
+  password    TEXT        NOT NULL DEFAULT '',
   company     TEXT,
   created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
@@ -102,7 +88,8 @@ CREATE TABLE versions (
   file_type     "FileType"  NOT NULL,
   uploaded_by   TEXT        NOT NULL,
   uploaded_at   TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-  url           TEXT        NOT NULL,   -- relative: /uploads/<uuid>.<ext>
+  url           TEXT,  
+  html_code     TEXT,  
   notes         TEXT
 );
 
